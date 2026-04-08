@@ -436,6 +436,7 @@ public class Modules extends System<Modules> {
         add(new AutoRespawn());
         add(new AutoTool());
         add(new BreakDelay());
+        add(new ChestAura());
         add(new ChestSwap());
         add(new EXPThrower());
         add(new FakePlayer());
