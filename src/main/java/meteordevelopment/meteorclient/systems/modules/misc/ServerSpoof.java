@@ -71,8 +71,32 @@ public class ServerSpoof extends Module {
         .build()
     );
 
+    private final Setting<Boolean> spoofTranslationKey = sgGeneral.add(new BoolSetting.Builder()
+        .name("spoof-translation-key")
+        .description("Blocks outgoing packets that leak modded translation keys and locale info.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> blockFingerprint = sgGeneral.add(new BoolSetting.Builder()
+        .name("block-fingerprint")
+        .description("Blocks the Fabric mod fingerprint from being sent to the server.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> blockLocalHttp = sgGeneral.add(new BoolSetting.Builder()
+        .name("block-local-http")
+        .description("Prevents HTTP/HTTPS requests to localhost and local network addresses.")
+        .defaultValue(true)
+        .build()
+    );
+
     private MutableText msg;
     public boolean silentAcceptResourcePack = false;
+
+    private ProxySelector defaultProxySelector;
+    private boolean proxySelectorInstalled = false;
 
     public ServerSpoof() {
         super(Categories.Misc, "server-spoof", "Spoof client brand, resource pack and channels.");
@@ -86,10 +110,31 @@ public class ServerSpoof extends Module {
 
         if (event.packet instanceof CustomPayloadC2SPacket) {
             Identifier id = ((CustomPayloadC2SPacket) event.packet).payload().getId().id();
+            String idStr = id.toString();
+
+            // Block fingerprint
+            if (blockFingerprint.get()) {
+                for (String keyword : FINGERPRINT_KEYWORDS) {
+                    if (Strings.CI.contains(idStr, keyword)) {
+                        event.cancel();
+                        return;
+                    }
+                }
+            }
+
+            // Block translation key leaks
+            if (spoofTranslationKey.get()) {
+                for (String keyword : TRANSLATION_KEYWORDS) {
+                    if (Strings.CI.contains(idStr, keyword)) {
+                        event.cancel();
+                        return;
+                    }
+                }
+            }
 
             if (blockChannels.get()) {
                 for (String channel : channels.get()) {
-                    if (Strings.CI.contains(id.toString(), channel)) {
+                    if (Strings.CI.contains(idStr, channel)) {
                         event.cancel();
                         return;
                     }
@@ -154,6 +199,90 @@ public class ServerSpoof extends Module {
 
         info(msg);
         msg = null;
+    }
+
+    @Override
+    public void onActivate() {
+        if (blockLocalHttp.get()) installLocalHttpBlock();
+    }
+
+    @Override
+    public void onDeactivate() {
+        removeLocalHttpBlock();
+    }
+
+    private static final String[] FINGERPRINT_KEYWORDS = {
+        "fingerprint", "fabric:module", "fabric:registry", "fabric:networking"
+    };
+
+    private static final String[] TRANSLATION_KEYWORDS = {
+        "translation", "locale", "lang", "language", "minecraft:brand"
+    };
+
+    // Local HTTP Request Prevention
+
+    private void installLocalHttpBlock() {
+        if (proxySelectorInstalled) return;
+
+        defaultProxySelector = ProxySelector.getDefault();
+
+        ProxySelector blocking = new ProxySelector() {
+            @Override
+            public java.util.List<java.net.Proxy> select(URI uri) {
+                String host = uri.getHost();
+                String scheme = uri.getScheme();
+
+                if (("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) && isLocalAddress(host)) {
+                    return java.util.Collections.emptyList();
+                }
+
+                return defaultProxySelector != null ? defaultProxySelector.select(uri) : java.util.List.of(java.net.Proxy.NO_PROXY);
+            }
+
+            @Override
+            public void connectFailed(URI uri, java.net.SocketAddress sa, java.io.IOException ioe) {
+                // Silently ignore
+            }
+        };
+
+        ProxySelector.setDefault(blocking);
+        proxySelectorInstalled = true;
+    }
+
+    private void removeLocalHttpBlock() {
+        if (!proxySelectorInstalled) return;
+
+        if (defaultProxySelector != null) {
+            ProxySelector.setDefault(defaultProxySelector);
+        }
+
+        proxySelectorInstalled = false;
+        defaultProxySelector = null;
+    }
+
+    private static boolean isLocalAddress(String host) {
+        if (host == null) return false;
+
+        // Loopback
+        if (host.equals("localhost") || host.equals("127.0.0.1") || host.equals("0.0.0.0")
+            || host.equals("[::1]") || host.equals("::1")) return true;
+
+        // IPv4 private ranges
+        if (host.startsWith("127.") || host.startsWith("192.168.") || host.startsWith("10.")
+            || host.startsWith("169.254.")) return true;
+
+        // 172.16.0.0/12
+        if (host.startsWith("172.")) {
+            int secondOctet;
+            try { secondOctet = Integer.parseInt(host.split("\\.")[1]); }
+            catch (NumberFormatException e) { return false; }
+            if (secondOctet >= 16 && secondOctet <= 31) return true;
+        }
+
+        // IPv6 link-local
+        if (host.startsWith("[0:0:0:0:0:0:0:1") || host.startsWith("fe80:")) return true;
+
+        return false;
     }
 
     private static URL getParsedResourcePackUrl(String url) {
