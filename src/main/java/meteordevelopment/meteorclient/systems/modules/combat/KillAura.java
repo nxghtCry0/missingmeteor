@@ -176,6 +176,16 @@ public class KillAura extends Module {
         .build()
     );
 
+    private final Setting<Double> fov = sgTargeting.add(new DoubleSetting.Builder()
+        .name("fov")
+        .description("Only attack entities within this field of view angle in degrees.")
+        .defaultValue(360)
+        .min(0)
+        .max(360)
+        .sliderMax(360)
+        .build()
+    );
+
     private final Setting<EntityAge> hostileMobAgeFilter = sgTargeting.add(new EnumSetting.Builder<EntityAge>()
         .name("hostile-mob-age-filter")
         .description("Determines the age of hostile mobs to target (zombies, piglins, hoglins, zoglins).")
@@ -248,6 +258,16 @@ public class KillAura extends Module {
         .min(0)
         .sliderMax(60)
         .visible(customDelay::get)
+        .build()
+    );
+
+    private final Setting<Integer> hitChance = sgTiming.add(new IntSetting.Builder()
+        .name("hit-chance")
+        .description("Chance of attacking each tick as a percentage.")
+        .defaultValue(100)
+        .min(0)
+        .max(100)
+        .sliderRange(0, 100)
         .build()
     );
 
@@ -413,6 +433,12 @@ public class KillAura extends Module {
                 && tameable.getOwner().equals(mc.player)
             ) return false;
         }
+        // Check FOV
+        if (fov.get() < 360) {
+            double angle = getAngleToEntity(entity);
+            if (Math.abs(angle) > fov.get() / 2.0) return false;
+        }
+
         if (ignorePassive.get()) {
             if (entity instanceof EndermanEntity enderman && !enderman.isAngry()) return false;
             if ((entity instanceof PiglinEntity || entity instanceof ZombifiedPiglinEntity || entity instanceof WolfEntity) && !((MobEntity) entity).isAttacking()) return false;
@@ -462,7 +488,34 @@ public class KillAura extends Module {
         } else return mc.player.getAttackCooldownProgress(delay) >= 1;
     }
 
+    private double getAngleToEntity(Entity entity) {
+        double yaw = Math.toRadians(mc.player.getYaw());
+        double pitch = Math.toRadians(mc.player.getPitch());
+
+        double dx = entity.getX() - mc.player.getX();
+        double dy = (entity.getY() + entity.getHeight() / 2.0) - (mc.player.getY() + mc.player.getEyeHeight(mc.player.getPose()));
+        double dz = entity.getZ() - mc.player.getZ();
+
+        double dist = Math.sqrt(dx * dx + dz * dz);
+        double entityYaw = Math.atan2(-dx, dz);
+        double entityPitch = Math.atan2(-dy, dist);
+
+        double yawDiff = Math.toDegrees(wrapAngle(entityYaw - yaw));
+        double pitchDiff = Math.toDegrees(wrapAngle(entityPitch - pitch));
+
+        return Math.sqrt(yawDiff * yawDiff + pitchDiff * pitchDiff);
+    }
+
+    private double wrapAngle(double angle) {
+        while (angle > Math.PI) angle -= 2 * Math.PI;
+        while (angle < -Math.PI) angle += 2 * Math.PI;
+        return angle;
+    }
+
     private void attack(Entity target) {
+        // Hit chance check
+        if (hitChance.get() < 100 && Utils.random(0, 100) > hitChance.get()) return;
+
         if (rotation.get() == RotationMode.OnHit) Rotations.rotate(Rotations.getYaw(target), Rotations.getPitch(target, Target.Body));
 
         mc.interactionManager.attackEntity(mc.player, target);
