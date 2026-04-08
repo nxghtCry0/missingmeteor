@@ -166,6 +166,13 @@ public class AimAssist extends Module {
         .build()
     );
 
+    private final Setting<Boolean> targetInvisible = sgTargeting.add(new BoolSetting.Builder()
+        .name("target-invisible")
+        .description("Whether or not to aim at invisible entities.")
+        .defaultValue(true)
+        .build()
+    );
+
     // Speed
 
     private final Setting<Double> horizontalSpeed = sgSpeed.add(new DoubleSetting.Builder()
@@ -407,6 +414,7 @@ public class AimAssist extends Module {
                 && tameable.getOwner().equals(mc.player)
             ) return false;
         }
+        if (!targetInvisible.get() && entity.isInvisible()) return false;
         if (ignorePassive.get()) {
             if (entity instanceof EndermanEntity enderman && !enderman.isAngry()) return false;
             if ((entity instanceof PiglinEntity || entity instanceof ZombifiedPiglinEntity || entity instanceof WolfEntity) && !((MobEntity) entity).isAttacking()) return false;

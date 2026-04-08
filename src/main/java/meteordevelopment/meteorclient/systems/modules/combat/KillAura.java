@@ -214,6 +214,13 @@ public class KillAura extends Module {
         .build()
     );
 
+    private final Setting<Boolean> targetInvisible = sgTargeting.add(new BoolSetting.Builder()
+        .name("target-invisible")
+        .description("Whether or not to attack invisible entities.")
+        .defaultValue(true)
+        .build()
+    );
+
     // Timing
 
     private final Setting<Boolean> pauseOnLag = sgTiming.add(new BoolSetting.Builder()
@@ -433,6 +440,7 @@ public class KillAura extends Module {
                 && tameable.getOwner().equals(mc.player)
             ) return false;
         }
+        if (!targetInvisible.get() && entity.isInvisible()) return false;
         // Check FOV
         if (fov.get() < 360) {
             double angle = getAngleToEntity(entity);
