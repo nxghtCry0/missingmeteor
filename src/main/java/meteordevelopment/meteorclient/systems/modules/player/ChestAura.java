@@ -140,9 +140,8 @@ public class ChestAura extends Module {
                     // Check if within reach (interaction range)
                     if (!PlayerUtils.isWithinReach(pos)) continue;
 
-                    // Check if already open
-                    BlockEntity entity = mc.world.getBlockEntity(pos);
-                    if (entity instanceof ChestBlockEntity chest && chest.getViewerCount() > 0) continue;
+                    // Check if already open (skip viewer check as API varies by version)
+                    // BlockEntity entity = mc.world.getBlockEntity(pos);
 
                     // Check if in view
                     if (onlyInView.get() && !isInView(pos)) continue;

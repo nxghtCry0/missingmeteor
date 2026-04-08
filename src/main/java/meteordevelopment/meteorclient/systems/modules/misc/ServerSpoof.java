@@ -26,6 +26,7 @@ import net.minecraft.util.Identifier;
 import org.apache.commons.lang3.Strings;
 
 import java.net.MalformedURLException;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;

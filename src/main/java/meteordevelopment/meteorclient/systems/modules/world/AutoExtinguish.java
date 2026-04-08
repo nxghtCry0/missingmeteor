@@ -123,24 +123,19 @@ public class AutoExtinguish extends Module {
             Block block = blockState.getBlock();
 
             // Regular fire and soul fire
-            if (block instanceof AbstractFireBlock fireBlock) {
-                // AbstractFireBlock covers both FireBlock and SoulFireBlock
-                if (fireBlock.isInfinite(mc.world, blockPos, blockState)) {
-                    // Infinite fire on bedrock - still punchable in the nether
+            if (block instanceof AbstractFireBlock) {
+                if (block == Blocks.FIRE && fire.get()) {
                     toExtinguish.add(blockPos.toImmutable());
-                } else {
-                    if (block == Blocks.FIRE && fire.get()) {
-                        toExtinguish.add(blockPos.toImmutable());
-                    } else if (block == Blocks.SOUL_FIRE && soulFire.get()) {
-                        toExtinguish.add(blockPos.toImmutable());
-                    }
+                } else if (block == Blocks.SOUL_FIRE && soulFire.get()) {
+                    toExtinguish.add(blockPos.toImmutable());
                 }
                 return;
             }
 
-            // Campfires and soul campfires
-            if (campfires.get() && block instanceof CampfireBlock campfire) {
-                if (campfire.isLit(blockState)) {
+            // Campfires and soul campfires - check via state property
+            if (campfires.get() && (block == Blocks.CAMPFIRE || block == Blocks.SOUL_CAMPFIRE)) {
+                Boolean lit = blockState.get(CampfireBlock.LIT);
+                if (lit != null && lit) {
                     toExtinguish.add(blockPos.toImmutable());
                 }
                 return;
@@ -158,10 +153,11 @@ public class AutoExtinguish extends Module {
 
             for (BlockPos pos : toExtinguish) {
                 BlockState state = mc.world.getBlockState(pos);
+                Block block = state.getBlock();
 
                 // For fire/campfires we punch (interact), for lava we try to break
-                boolean isFireOrCampfire = state.getBlock() instanceof AbstractFireBlock
-                    || (state.getBlock() instanceof CampfireBlock cb && cb.isLit(state));
+                boolean isFireOrCampfire = block instanceof AbstractFireBlock
+                    || block == Blocks.CAMPFIRE || block == Blocks.SOUL_CAMPFIRE;
 
                 if (isFireOrCampfire) {
                     // Punch the fire/campfire by interacting with it
@@ -171,7 +167,7 @@ public class AutoExtinguish extends Module {
                         interactBlock(pos);
                     }
                 } else {
-                    // For lava, try breaking (won't actually break but will place adjacent blocks)
+                    // For lava, try breaking
                     if (!BlockUtils.canBreak(pos, state)) continue;
 
                     if (!hasLineOfSight(pos)) continue;
@@ -196,10 +192,7 @@ public class AutoExtinguish extends Module {
         if (!hasLineOfSight(pos)) return;
 
         BlockHitResult hitResult = new BlockHitResult(pos.toCenterPos(), net.minecraft.util.math.Direction.UP, pos, false);
-        mc.player.networkHandler.sendPacket(new net.minecraft.network.packet.c2s.play.PlayerInteractBlockPacket(
-            Hand.MAIN_HAND, hitResult, 0
-        ));
-        if (swing.get()) mc.player.swingHand(Hand.MAIN_HAND);
+        BlockUtils.interact(hitResult, Hand.MAIN_HAND, swing.get());
     }
 
     private boolean hasLineOfSight(BlockPos blockPos) {

@@ -353,9 +353,10 @@ public class AutoPot extends Module {
         if (contents == null) return null;
 
         var effects = contents.getEffects();
-        if (effects.isEmpty()) return null;
+        var iter = effects.iterator();
+        if (!iter.hasNext()) return null;
 
-        return effects.get(0).getEffectType().value();
+        return iter.next().getEffectType().value();
     }
 
     private int getAmplifier(ItemStack stack) {
@@ -363,9 +364,10 @@ public class AutoPot extends Module {
         if (contents == null) return 0;
 
         var effects = contents.getEffects();
-        if (effects.isEmpty()) return 0;
+        var iter = effects.iterator();
+        if (!iter.hasNext()) return 0;
 
-        return effects.get(0).getAmplifier();
+        return iter.next().getAmplifier();
     }
 
     // ===== Throwing Logic =====
@@ -376,7 +378,7 @@ public class AutoPot extends Module {
             float yaw = mc.player.getYaw();
             float pitch = 90f; // Look straight down
 
-            mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(yaw, pitch, mc.player.isOnGround()));
+            mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(yaw, pitch, mc.player.isOnGround(), mc.player.horizontalCollision));
         }
 
         // Swap to the potion slot
