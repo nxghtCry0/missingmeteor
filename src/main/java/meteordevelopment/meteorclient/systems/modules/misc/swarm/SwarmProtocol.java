@@ -65,13 +65,32 @@ public class SwarmProtocol {
 
     // --- Serialization Helpers ---
 
-    // Handshake: worker sends [version:int]
-    public static byte[] serializeHandshake(int version) {
-        return writeInt(version);
+    // Worker -> Host handshake: [version:int][nameLen:int][name:bytes]
+    public static byte[] serializeWorkerHandshake(int version, String playerName) {
+        byte[] nameBytes = writeString(playerName);
+        byte[] buf = new byte[4 + nameBytes.length];
+        putInt(buf, 0, version);
+        System.arraycopy(nameBytes, 0, buf, 4, nameBytes.length);
+        return buf;
     }
 
-    // Handshake response: host sends [workerId:int]
-    public static int deserializeHandshake(byte[] data) {
+    // Parse worker handshake: extract version
+    public static int readHandshakeVersion(byte[] data) {
+        return readInt(data, 0);
+    }
+
+    // Parse worker handshake: extract player name
+    public static String readHandshakePlayerName(byte[] data) {
+        return readString(data, 4);
+    }
+
+    // Host -> Worker handshake response: [workerId:int]
+    public static byte[] serializeHandshakeResponse(int workerId) {
+        return writeInt(workerId);
+    }
+
+    // Worker parses host handshake response: get assigned worker ID
+    public static int deserializeHandshakeResponse(byte[] data) {
         return readInt(data, 0);
     }
 

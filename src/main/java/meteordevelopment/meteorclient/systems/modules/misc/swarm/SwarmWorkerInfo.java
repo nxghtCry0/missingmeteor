@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class SwarmWorkerInfo {
     public final int id;
+    public String playerName = "unknown";
     public String group = "default";
     public double x, y, z;
     public float yaw, pitch;
@@ -27,8 +28,9 @@ public class SwarmWorkerInfo {
     // Inventory (itemRawId -> count)
     public final Map<Integer, Integer> inventory = new ConcurrentHashMap<>();
 
-    public SwarmWorkerInfo(int id) {
+    public SwarmWorkerInfo(int id, String playerName) {
         this.id = id;
+        this.playerName = playerName;
         this.lastUpdate = System.currentTimeMillis();
     }
 
@@ -51,6 +53,6 @@ public class SwarmWorkerInfo {
 
     @Override
     public String toString() {
-        return String.format("Worker #%d [%s] (%.0f, %.0f, %.0f) ping=%dms", id, group, x, y, z, ping);
+        return String.format("Worker #%d [%s] (%s) (%.0f, %.0f, %.0f) ping=%dms", id, playerName, group, x, y, z, ping);
     }
 }

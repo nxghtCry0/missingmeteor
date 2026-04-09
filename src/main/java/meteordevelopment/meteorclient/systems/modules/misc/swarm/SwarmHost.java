@@ -7,10 +7,6 @@ package meteordevelopment.meteorclient.systems.modules.misc.swarm;
 
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -71,41 +67,35 @@ public class SwarmHost extends Thread {
 
     private void assignConnection(Socket connection) {
         try {
+            // Step 1: Create connection (does NOT start thread yet)
             SwarmConnection conn = new SwarmConnection(connection, this);
 
-            // Handshake: read worker's protocol version
-            // (The worker sends HANDSHAKE immediately on connect)
-            // We read it in the connection's first read cycle, but we need to assign the ID first
-            // So we do the handshake synchronously here before the connection thread takes over
-
-            DataInputStream in = new DataInputStream(new BufferedInputStream(connection.getInputStream()));
-            DataOutputStream out = new DataOutputStream(new BufferedOutputStream(connection.getOutputStream()));
-
-            // Read handshake
-            byte type = SwarmProtocol.readType(in);
+            // Step 2: Read handshake from the connection's OWN input stream
+            byte type = conn.in.readByte();
             if (type != SwarmProtocol.HANDSHAKE) {
                 ChatUtils.errorPrefix("Swarm", "Worker sent unexpected type %d, expected HANDSHAKE.", type);
                 connection.close();
                 return;
             }
-            byte[] payload = SwarmProtocol.readPayload(in);
-            int version = SwarmProtocol.deserializeHandshake(payload);
+            byte[] payload = SwarmProtocol.readPayload(conn.in);
+            int version = SwarmProtocol.readHandshakeVersion(payload);
+            String playerName = SwarmProtocol.readHandshakePlayerName(payload);
 
             if (version != SwarmProtocol.PROTOCOL_VERSION) {
-                ChatUtils.errorPrefix("Swarm", "Worker has incompatible protocol version %d (expected %d).", version, SwarmProtocol.PROTOCOL_VERSION);
+                ChatUtils.errorPrefix("Swarm", "Worker '%s' has incompatible protocol version %d (expected %d).", playerName, version, SwarmProtocol.PROTOCOL_VERSION);
                 connection.close();
                 return;
             }
 
-            // Assign worker ID
+            // Step 3: Assign worker ID and store
             int workerId = nextWorkerId++;
             conn.workerId = workerId;
 
-            // Send back the worker ID
-            SwarmProtocol.writeFrame(out, SwarmProtocol.HANDSHAKE, SwarmProtocol.serializeHandshake(workerId));
-            out.flush();
+            SwarmWorkerInfo info = new SwarmWorkerInfo(workerId, playerName);
+            workers.put(workerId, info);
+            conn.info = info;
 
-            // Store connection
+            // Store connection in array
             for (int i = 0; i < connections.length; i++) {
                 if (connections[i] == null) {
                     connections[i] = conn;
@@ -113,18 +103,17 @@ public class SwarmHost extends Thread {
                 }
             }
 
-            // Create worker info
-            SwarmWorkerInfo info = new SwarmWorkerInfo(workerId);
-            workers.put(workerId, info);
-            conn.info = info;
+            // Step 4: Send back worker ID using the connection's OWN output stream
+            SwarmProtocol.writeFrame(conn.out, SwarmProtocol.HANDSHAKE, SwarmProtocol.serializeHandshakeResponse(workerId));
+            conn.out.flush();
 
-            // Push the buffered input stream to the connection
-            // (We already read the handshake, the connection will continue from here)
-            ChatUtils.infoPrefix("Swarm", "Worker (highlight)#%d(default) connected with protocol v%d.", workerId, version);
+            // Step 5: NOW start the read loop
+            conn.startReading();
+
+            ChatUtils.infoPrefix("Swarm", "Worker (highlight)%s(default) connected as (highlight)#%d(default) [protocol v%d].", playerName, workerId, version);
 
         } catch (IOException e) {
-            ChatUtils.errorPrefix("Swarm", "Error during worker handshake.");
-            e.printStackTrace();
+            ChatUtils.errorPrefix("Swarm", "Error during worker handshake: %s", e.getMessage());
             try { connection.close(); } catch (IOException ignored) {}
         }
     }
@@ -169,7 +158,6 @@ public class SwarmHost extends Thread {
                 hiveInventory.updateWorkerInventory(workerId, invMap);
             }
             case SwarmProtocol.PING -> {
-                // Respond with pong
                 sendToWorker(workerId, SwarmProtocol.PONG, payload);
             }
             case SwarmProtocol.PONG -> {
@@ -178,14 +166,14 @@ public class SwarmHost extends Thread {
             }
             case SwarmProtocol.GROUP_ASSIGN -> {
                 info.group = SwarmProtocol.deserializeGroupAssign(payload);
-                ChatUtils.infoPrefix("Swarm", "Worker #%d joined group (highlight)%s", workerId, info.group);
+                ChatUtils.infoPrefix("Swarm", "Worker (highlight)%s(default) assigned to group (highlight)%s", info.playerName, info.group);
             }
             case SwarmProtocol.DISCONNECT -> {
                 String reason = SwarmProtocol.deserializeDisconnect(payload);
-                ChatUtils.infoPrefix("Swarm", "Worker #%d disconnecting: %s", workerId, reason);
+                ChatUtils.infoPrefix("Swarm", "Worker (highlight)%s(default) disconnecting: %s", info.playerName, reason);
                 removeWorker(workerId);
             }
-            default -> ChatUtils.warningPrefix("Swarm", "Unknown message type %d from worker #%d.", type, workerId);
+            default -> ChatUtils.warningPrefix("Swarm", "Unknown message type %d from worker #%d (%s).", type, workerId, info.playerName);
         }
     }
 
@@ -206,6 +194,8 @@ public class SwarmHost extends Thread {
         SwarmConnection conn = getConnectionByWorkerId(workerId);
         if (conn != null && conn.active) {
             conn.sendCommand(command);
+            SwarmWorkerInfo info = workers.get(workerId);
+            ChatUtils.infoPrefix("Swarm", "Sent command to (highlight)%s(default) [#%d].", info != null ? info.playerName : "?", workerId);
         } else {
             ChatUtils.errorPrefix("Swarm", "Worker #%d not found or disconnected.", workerId);
         }
@@ -236,6 +226,37 @@ public class SwarmHost extends Thread {
         }
     }
 
+    /** Resolve a target string to a worker ID. Tries: player name -> worker ID -> group name. Returns null if not found. */
+    public ResolveResult resolveTarget(String target) {
+        // 1. Try player name (case-insensitive)
+        for (SwarmWorkerInfo info : workers.values()) {
+            if (info.playerName.equalsIgnoreCase(target)) {
+                return new ResolveResult(ResolveType.Worker, info.id, info.playerName);
+            }
+        }
+
+        // 2. Try numeric worker ID
+        try {
+            int id = Integer.parseInt(target);
+            if (workers.containsKey(id)) {
+                return new ResolveResult(ResolveType.Worker, id, workers.get(id).playerName);
+            }
+        } catch (NumberFormatException ignored) {}
+
+        // 3. Try group name (case-insensitive)
+        for (SwarmWorkerInfo info : workers.values()) {
+            if (info.group.equalsIgnoreCase(target)) {
+                return new ResolveResult(ResolveType.Group, 0, target);
+            }
+        }
+
+        return null;
+    }
+
+    public enum ResolveType { Worker, Group }
+
+    public record ResolveResult(ResolveType type, int workerId, String name) {}
+
     /** Assign a worker to a group. */
     public void assignGroup(int workerId, String group) {
         SwarmWorkerInfo info = workers.get(workerId);
@@ -245,7 +266,7 @@ public class SwarmHost extends Thread {
         }
         info.group = group;
         sendToWorker(workerId, SwarmProtocol.GROUP_ASSIGN, SwarmProtocol.serializeGroupAssign(group));
-        ChatUtils.infoPrefix("Swarm", "Worker #%d assigned to group (highlight)%s", workerId, group);
+        ChatUtils.infoPrefix("Swarm", "Worker (highlight)%s(default) [#%d] assigned to group (highlight)%s", info.playerName, workerId, group);
     }
 
     /** Assign all workers to a group. */
@@ -288,7 +309,6 @@ public class SwarmHost extends Thread {
     public void tick() {
         tickCounter++;
 
-        // Periodically broadcast claim table to all workers
         if (ussEnabled && tickCounter % ussSyncRate == 0) {
             broadcastClaimTable();
         }
@@ -307,16 +327,13 @@ public class SwarmHost extends Thread {
     // --- Cleanup ---
 
     public void removeWorker(int workerId) {
-        // Clean claims
+        SwarmWorkerInfo info = workers.get(workerId);
+        String name = info != null ? info.playerName : "#" + workerId;
+
         claimTable.entrySet().removeIf(e -> SwarmProtocol.getWorkerIdFromValue(e.getValue()) == workerId);
-
-        // Clean inventory
         hiveInventory.removeWorker(workerId);
-
-        // Clean worker info
         workers.remove(workerId);
 
-        // Clean connection
         for (int i = 0; i < connections.length; i++) {
             if (connections[i] != null && connections[i].workerId == workerId) {
                 connections[i].active = false;
@@ -325,11 +342,10 @@ public class SwarmHost extends Thread {
             }
         }
 
-        ChatUtils.infoPrefix("Swarm", "Worker #%d removed.", workerId);
+        ChatUtils.infoPrefix("Swarm", "Worker (highlight)%s(default) removed.", name);
     }
 
     public void disconnect() {
-        // Notify all workers
         byte[] payload = SwarmProtocol.serializeDisconnect("Host shutting down");
         for (SwarmConnection conn : connections) {
             if (conn != null) {
@@ -363,6 +379,14 @@ public class SwarmHost extends Thread {
     public SwarmConnection getConnectionByWorkerId(int workerId) {
         for (SwarmConnection conn : connections) {
             if (conn != null && conn.workerId == workerId) return conn;
+        }
+        return null;
+    }
+
+    /** Find a worker by their in-game player name. */
+    public SwarmWorkerInfo getWorkerByName(String name) {
+        for (SwarmWorkerInfo info : workers.values()) {
+            if (info.playerName.equalsIgnoreCase(name)) return info;
         }
         return null;
     }

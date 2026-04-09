@@ -9,6 +9,7 @@ import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.gui.GuiTheme;
+import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.containers.WHorizontalList;
 import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
@@ -143,7 +144,9 @@ public class Swarm extends Module {
     @Override
     public String getInfoString() {
         if (isHost()) return String.format("Host | %d workers", host.getConnectionCount());
-        if (isWorker()) return String.format("Worker #%d [%s]", worker.workerId, worker.group);
+        if (isWorker()) return String.format("#%d %s [%s]", worker.workerId,
+            MeteorClient.mc.player != null ? MeteorClient.mc.player.getName().getString() : "?",
+            worker.group);
         return mode.get().name();
     }
 

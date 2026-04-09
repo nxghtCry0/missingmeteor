@@ -18,8 +18,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public class SwarmConnection extends Thread {
     public final Socket socket;
     private final SwarmHost host;
-    private final DataInputStream in;
-    private final DataOutputStream out;
+    public final DataInputStream in;
+    public final DataOutputStream out;
 
     public int workerId = -1;
     public SwarmWorkerInfo info;
@@ -32,13 +32,19 @@ public class SwarmConnection extends Thread {
         this.host = host;
         this.in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
         this.out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
+        // Do NOT start the thread here — the host does the handshake first, then calls startReading()
+    }
+
+    /**
+     * Start the read loop. Called after the host completes the handshake.
+     */
+    public void startReading() {
         start();
     }
 
     @Override
     public void run() {
         active = true;
-        ChatUtils.infoPrefix("Swarm", "New worker connected from %s.", getIp(socket.getInetAddress().getHostAddress()));
 
         try {
             while (active && !isInterrupted()) {
@@ -62,7 +68,8 @@ public class SwarmConnection extends Thread {
             }
         } catch (IOException | InterruptedException e) {
             if (active) {
-                ChatUtils.warningPrefix("Swarm", "Worker #%d disconnected: %s", workerId, e.getMessage());
+                ChatUtils.warningPrefix("Swarm", "Worker #%d (%s) disconnected: %s", workerId,
+                    info != null ? info.playerName : "?", e.getMessage());
             }
         } finally {
             active = false;
@@ -93,19 +100,10 @@ public class SwarmConnection extends Thread {
         sendFrame(SwarmProtocol.COMMAND, SwarmProtocol.serializeCommand(command));
     }
 
-    /**
-     * Send raw bytes immediately (for handshake which must go first).
-     */
-    public void sendRaw(byte type, byte[] payload) throws IOException {
-        SwarmProtocol.writeFrame(out, type, payload);
-        out.flush();
-    }
-
     public void disconnect() {
         active = false;
         try { socket.close(); } catch (IOException ignored) {}
         interrupt();
-        ChatUtils.infoPrefix("Swarm", "Worker #%d disconnected.", workerId);
     }
 
     public String getConnection() {

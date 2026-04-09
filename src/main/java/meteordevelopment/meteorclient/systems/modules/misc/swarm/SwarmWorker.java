@@ -63,16 +63,17 @@ public class SwarmWorker extends Thread {
         ChatUtils.infoPrefix("Swarm", "Connected to HiveMind host at %s:%s.", getIp(), socket.getPort());
 
         try {
-            // Step 1: Send handshake with protocol version
-            SwarmProtocol.writeFrame(out, SwarmProtocol.HANDSHAKE, SwarmProtocol.serializeHandshake(SwarmProtocol.PROTOCOL_VERSION));
+            // Step 1: Send handshake with protocol version + player name
+            String playerName = MeteorClient.mc.player != null ? MeteorClient.mc.player.getName().getString() : "unknown";
+            SwarmProtocol.writeFrame(out, SwarmProtocol.HANDSHAKE, SwarmProtocol.serializeWorkerHandshake(SwarmProtocol.PROTOCOL_VERSION, playerName));
             out.flush();
 
             // Step 2: Receive worker ID assignment
             byte type = SwarmProtocol.readType(in);
             byte[] payload = SwarmProtocol.readPayload(in);
             if (type == SwarmProtocol.HANDSHAKE) {
-                workerId = SwarmProtocol.deserializeHandshake(payload);
-                ChatUtils.infoPrefix("Swarm", "Assigned worker ID: (highlight)#%d", workerId);
+                workerId = SwarmProtocol.deserializeHandshakeResponse(payload);
+                ChatUtils.infoPrefix("Swarm", "Assigned worker ID: (highlight)#%d(default) as (highlight)%s", workerId, playerName);
             } else {
                 ChatUtils.errorPrefix("Swarm", "Expected handshake response, got type %d.", type);
                 disconnect();

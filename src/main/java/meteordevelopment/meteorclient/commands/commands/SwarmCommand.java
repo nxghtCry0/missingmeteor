@@ -20,6 +20,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.misc.swarm.Swarm;
 import meteordevelopment.meteorclient.systems.modules.misc.swarm.SwarmHiveInventory;
+import meteordevelopment.meteorclient.systems.modules.misc.swarm.SwarmHost;
 import meteordevelopment.meteorclient.systems.modules.misc.swarm.SwarmWorker;
 import meteordevelopment.meteorclient.systems.modules.misc.swarm.SwarmWorkerInfo;
 import meteordevelopment.meteorclient.systems.modules.world.InfinityMiner;
@@ -113,8 +114,8 @@ public class SwarmCommand extends Command {
                 if (count > 0) {
                     ChatUtils.info("--- (highlight)HiveMind Workers (%d)(default) ---", count);
                     for (SwarmWorkerInfo info : swarm.host.getWorkers()) {
-                        ChatUtils.info("  (highlight)#%d(default) [%s] %s | (%.0f, %.0f, %.0f) | %dms",
-                            info.id, info.group, info.isAlive() ? "(a)Online" : "(c)Offline",
+                        ChatUtils.info("  (highlight)#%d %s(default) [%s] | (%.0f, %.0f, %.0f) | %dms",
+                            info.id, info.playerName, info.group, info.isAlive() ? "(a)Online" : "(c)Offline",
                             info.x, info.y, info.z, info.ping);
                     }
                 } else {
@@ -146,14 +147,17 @@ public class SwarmCommand extends Command {
                             swarm.host.sendMessage(command);
                             info("Broadcast command to (highlight)all(default) workers.");
                         } else {
-                            // Try parsing as worker ID (number)
-                            try {
-                                int workerId = Integer.parseInt(target);
-                                swarm.host.sendToWorker(workerId, command);
-                                info("Sent command to worker (highlight)#%d", workerId);
-                            } catch (NumberFormatException e) {
-                                // Treat as group name
-                                swarm.host.sendToGroup(target, command);
+                            // Resolve: player name -> worker ID -> group name
+                            SwarmHost.ResolveResult resolved = swarm.host.resolveTarget(target);
+                            if (resolved == null) {
+                                error("No worker or group found matching '%s'.", target);
+                                return SINGLE_SUCCESS;
+                            }
+
+                            if (resolved.type() == SwarmHost.ResolveType.Worker) {
+                                swarm.host.sendToWorker(resolved.workerId(), command);
+                            } else {
+                                swarm.host.sendToGroup(resolved.name(), command);
                             }
                         }
                         return SINGLE_SUCCESS;
@@ -181,11 +185,17 @@ public class SwarmCommand extends Command {
                         if (workerStr.equalsIgnoreCase("all")) {
                             swarm.host.assignAllGroups(groupName);
                         } else {
-                            try {
-                                int workerId = Integer.parseInt(workerStr);
-                                swarm.host.assignGroup(workerId, groupName);
-                            } catch (NumberFormatException e) {
-                                error("'%s' is not a valid worker ID or 'all'.", workerStr);
+                            // Resolve: player name -> worker ID
+                            SwarmWorkerInfo found = swarm.host.getWorkerByName(workerStr);
+                            if (found == null) {
+                                try {
+                                    int workerId = Integer.parseInt(workerStr);
+                                    swarm.host.assignGroup(workerId, groupName);
+                                } catch (NumberFormatException e) {
+                                    error("No worker found matching '%s'. Use a player name, worker ID, or 'all'.", workerStr);
+                                }
+                            } else {
+                                swarm.host.assignGroup(found.id, groupName);
                             }
                         }
                         return SINGLE_SUCCESS;
@@ -234,8 +244,8 @@ public class SwarmCommand extends Command {
             } else {
                 ChatUtils.info("--- (highlight)HiveMind Workers (%d)(default) ---", count);
                 for (SwarmWorkerInfo info : swarm.host.getWorkers()) {
-                    ChatUtils.info("  (highlight)#%d(default) | Group: (highlight)%s(default) | Pos: (%.0f, %.0f, %.0f) | Ping: %dms | %s",
-                        info.id, info.group, info.x, info.y, info.z, info.ping,
+                    ChatUtils.info("  (highlight)%s(default) | #%d | Group: (highlight)%s(default) | Pos: (%.0f, %.0f, %.0f) | Ping: %dms | %s",
+                        info.playerName, info.id, info.group, info.x, info.y, info.z, info.ping,
                         info.isAlive() ? "(a)Online" : "(c)Timeout");
                 }
             }

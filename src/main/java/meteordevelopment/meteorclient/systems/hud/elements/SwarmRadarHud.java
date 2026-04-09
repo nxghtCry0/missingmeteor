@@ -246,7 +246,7 @@ public class SwarmRadarHud extends HudElement {
 
                 // Draw name label
                 if (showNames.get()) {
-                    renderer.text("#" + info.id, dotX + 4, dotY - 3, dotCol, true);
+                    renderer.text(info.playerName, dotX + 4, dotY - 3, dotCol, true);
                 }
             }
         }
