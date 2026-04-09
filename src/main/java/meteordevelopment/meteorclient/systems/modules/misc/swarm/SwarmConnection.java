@@ -1,63 +1,111 @@
 /*
- * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
- * Copyright (c) Meteor Development.
+ * This file is part of the MissingMeteor distribution (https://github.com/nxghtCry0/missingmeteor).
+ * Copyright (c) nxghtCry0.
  */
 
 package meteordevelopment.meteorclient.systems.modules.misc.swarm;
 
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 
-import java.io.DataOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.net.Socket;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
+/**
+ * Handles bidirectional binary communication with a single swarm worker.
+ * Runs on the host side — one SwarmConnection per connected worker.
+ */
 public class SwarmConnection extends Thread {
     public final Socket socket;
-    public String messageToSend;
+    private final SwarmHost host;
+    private final DataInputStream in;
+    private final DataOutputStream out;
 
-    public SwarmConnection(Socket socket) {
+    public int workerId = -1;
+    public SwarmWorkerInfo info;
+    public boolean active = false;
+
+    private final ConcurrentLinkedQueue<byte[]> sendQueue = new ConcurrentLinkedQueue<>();
+
+    public SwarmConnection(Socket socket, SwarmHost host) throws IOException {
         this.socket = socket;
+        this.host = host;
+        this.in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+        this.out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
         start();
     }
 
     @Override
     public void run() {
-        ChatUtils.infoPrefix("Swarm", "New worker connected on %s.", getIp(socket.getInetAddress().getHostAddress()));
+        active = true;
+        ChatUtils.infoPrefix("Swarm", "New worker connected from %s.", getIp(socket.getInetAddress().getHostAddress()));
 
         try {
-            DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-
-            while (!isInterrupted()) {
-                if (messageToSend != null) {
-                    try {
-                        out.writeUTF(messageToSend);
-                        out.flush();
-                    } catch (Exception e) {
-                        ChatUtils.errorPrefix("Swarm", "Encountered error when sending command.");
-                        e.printStackTrace();
+            while (active && !isInterrupted()) {
+                // Send queued messages
+                while (!sendQueue.isEmpty()) {
+                    byte[] frame = sendQueue.poll();
+                    if (frame != null) {
+                        out.write(frame);
                     }
+                }
+                out.flush();
 
-                    messageToSend = null;
+                // Check for incoming data (non-blocking via available)
+                if (in.available() > 0) {
+                    byte type = in.readByte();
+                    byte[] payload = SwarmProtocol.readPayload(in);
+                    host.handleWorkerMessage(workerId, type, payload);
+                } else {
+                    Thread.sleep(5); // Small sleep to avoid busy loop
                 }
             }
-
-            out.close();
-        } catch (IOException e) {
-            ChatUtils.infoPrefix("Swarm", "Error creating a connection with %s on port %s.", getIp(socket.getInetAddress().getHostAddress()), socket.getPort());
-            e.printStackTrace();
+        } catch (IOException | InterruptedException e) {
+            if (active) {
+                ChatUtils.warningPrefix("Swarm", "Worker #%d disconnected: %s", workerId, e.getMessage());
+            }
+        } finally {
+            active = false;
+            host.removeWorker(workerId);
+            try { in.close(); } catch (IOException ignored) {}
+            try { out.close(); } catch (IOException ignored) {}
         }
     }
 
-    public void disconnect() {
+    /**
+     * Queue a binary frame to send to this worker.
+     */
+    public void sendFrame(byte type, byte[] payload) {
         try {
-            socket.close();
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream tempOut = new DataOutputStream(baos);
+            SwarmProtocol.writeFrame(tempOut, type, payload);
+            sendQueue.add(baos.toByteArray());
         } catch (IOException e) {
-            e.printStackTrace();
+            ChatUtils.errorPrefix("Swarm", "Error queuing message to worker #%d.", workerId);
         }
+    }
 
-        ChatUtils.infoPrefix("Swarm", "Worker disconnected on ip: %s.", socket.getInetAddress().getHostAddress());
+    /**
+     * Send a command string to this worker.
+     */
+    public void sendCommand(String command) {
+        sendFrame(SwarmProtocol.COMMAND, SwarmProtocol.serializeCommand(command));
+    }
 
+    /**
+     * Send raw bytes immediately (for handshake which must go first).
+     */
+    public void sendRaw(byte type, byte[] payload) throws IOException {
+        SwarmProtocol.writeFrame(out, type, payload);
+        out.flush();
+    }
+
+    public void disconnect() {
+        active = false;
+        try { socket.close(); } catch (IOException ignored) {}
         interrupt();
+        ChatUtils.infoPrefix("Swarm", "Worker #%d disconnected.", workerId);
     }
 
     public String getConnection() {
